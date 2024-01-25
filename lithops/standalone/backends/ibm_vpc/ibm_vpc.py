@@ -71,7 +71,7 @@ class IBMVPCBackend:
 
         suffix = 'vm' if self.mode == StandaloneMode.CONSUME.value else 'vpc'
         self.cache_dir = os.path.join(CACHE_DIR, self.name)
-        self.cache_file = os.path.join(self.cache_dir, f'{self.region}_{suffix}_data')
+        self.cache_file = os.path.join(self.cache_dir, f'{self.zone}_{suffix}_data')
 
         logger.debug(f'Setting VPC endpoint to: {self.endpoint}')
 
@@ -533,7 +533,7 @@ class IBMVPCBackend:
         self.config['floating_ip'] = fip
         self.config['floating_ip_id'] = fip_id
 
-        build_vm = IBMVPCInstance('building-image-'+image_name, self.config, self.vpc_cli, public=True)
+        build_vm = IBMVPCInstance('building-image-' + image_name, self.config, self.vpc_cli, public=True)
         build_vm.public_ip = self.config['floating_ip']
         build_vm.instance_type = self.config['master_profile_name']
         build_vm.delete_on_dismantle = False

@@ -1,52 +1,26 @@
 # Requirements.txt contains a list of dependencies for the Python Application #
 
-# Setup modules
+# Mandatory Lithops packages
 gunicorn
-gevent
 flask
-
-# Lithops
+pika
+boto3
+ibm-cloud-sdk-core
+ibm-cos-sdk
+ibm-code-engine-sdk
+scikit-learn
+diskcache
+redis
+gevent
+requests
+PyYAML
+numpy
 cloudpickle
 ps-mem
 tblib
-PyYAML
+psutil
 kubernetes
 
-# default available packages for python3
-beautifulsoup4
-httplib2
-kafka_python
-lxml
-python-dateutil
-requests
-scrapy
-simplejson
-#virtualenv
-Twisted
-PyJWT
-
-# packages for numerics
-numpy
-scikit-learn
-scipy
-pandas
-
-# packages for image processing
-Pillow
-
-# IBM specific python modules
-#ibm_db
-#cloudant
-#watson-developer-cloud
-ibm-cos-sdk
+# Optional packages (Add your packages below)
 ibm-vpc
-ibm-code-engine-sdk
-#ibmcloudsql
-
-# Compose Libs
-psycopg2-binary
-#pymongo
-redis
-pika
-#elasticsearch
-etcd3
+#pandas
