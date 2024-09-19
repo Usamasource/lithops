@@ -1,3 +1,6 @@
+# Requirements.txt contains a list of dependencies for the Python Application #
+
+# Mandatory Lithops packages
 aliyun-fc2
 oss2
 pika
@@ -11,3 +14,8 @@ numpy
 cloudpickle
 ps-mem
 tblib
+psutil
+
+# Optional packages (Add your packages below)
+#pandas
+#matplotlib

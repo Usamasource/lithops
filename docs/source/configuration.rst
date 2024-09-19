@@ -31,6 +31,7 @@ Choose your compute and storage engines from the table below:
 || `Oracle Functions <compute_config/oracle_functions.html>`_        || `Oracle Object Storage <storage_config/oracle_oss.html>`_         |
 || `Kubernetes <compute_config/Kubernetes.html>`_                    ||                                                                   |
 || `Knative <compute_config/knative.html>`_                          ||                                                                   |
+|| `Singularity <compute_config/singularity.html>`_                  ||                                                                   |
 || `OpenWhisk <compute_config/openwhisk.html>`_                      ||                                                                   |
 || `Remote Host / Virtual Machine <compute_config/vm.html>`_         ||                                                                   |
 || `IBM Virtual Private Cloud <compute_config/ibm_vpc.html>`_        ||                                                                   |
@@ -44,7 +45,7 @@ Configuration File
 To configure Lithops through a `configuration file <https://github.com/lithops-cloud/lithops/blob/master/config/config_template.yaml>`_
 you have multiple options:
 
-1. Create e new file called ``config`` in the ``~/.lithops`` folder.
+1. Create a new file called ``config`` in the ``~/.lithops`` folder.
 
 2. Create a new file called ``.lithops_config`` in the root directory of your project from where you will execute your
    Lithops scripts.

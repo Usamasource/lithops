@@ -20,12 +20,11 @@ import time
 import uuid
 import logging
 import base64
+import boto3
+import botocore
 from botocore.exceptions import ClientError
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
-
-import boto3
-import botocore
 
 from lithops.version import __version__
 from lithops.util.ssh_client import SSHClient
@@ -55,10 +54,10 @@ def b64s(string):
 
 class AWSEC2Backend:
 
-    def __init__(self, config, mode):
+    def __init__(self, ec2_config, mode):
         logger.debug("Creating AWS EC2 client")
         self.name = 'aws_ec2'
-        self.config = config
+        self.config = ec2_config
         self.mode = mode
         self.region_name = self.config['region']
 
@@ -72,21 +71,28 @@ class AWSEC2Backend:
         self.ec2_data = {}
         self.vpc_name = None
         self.vpc_key = None
-        self.user_key = self.config['access_key_id'][-4:].lower()
 
         self.instance_types = {}
 
-        client_config = botocore.client.Config(
-            user_agent_extra=self.config['user_agent']
-        )
-
-        self.ec2_client = boto3.client(
-            'ec2', aws_access_key_id=self.config['access_key_id'],
-            aws_secret_access_key=self.config['secret_access_key'],
-            aws_session_token=self.config.get('session_token'),
-            config=client_config,
+        self.aws_session = boto3.Session(
+            aws_access_key_id=ec2_config.get('access_key_id'),
+            aws_secret_access_key=ec2_config.get('secret_access_key'),
+            aws_session_token=ec2_config.get('session_token'),
             region_name=self.region_name
         )
+
+        self.ec2_client = self.aws_session.client(
+            'ec2', config=botocore.client.Config(
+                user_agent_extra=self.config['user_agent']
+            )
+        )
+
+        if 'user_id' not in self.config:
+            sts_client = self.aws_session.client('sts')
+            identity = sts_client.get_caller_identity()
+
+        self.user_id = self.config.get('user_id') or identity["UserId"]
+        self.user_key = self.user_id.split(":")[0][-4:].lower()
 
         self.master = None
         self.workers = []
@@ -173,13 +179,6 @@ class AWSEC2Backend:
             if len(sg_info) > 0:
                 self.config['public_subnet_id'] = self.ec2_data['public_subnet_id']
 
-        # if 'private_subnet_id' in self.ec2_data:
-        #     sg_info = self.ec2_client.describe_subnets(
-        #         SubnetIds=[self.ec2_data['private_subnet_id']]
-        #     )
-        #     if len(sg_info) > 0:
-        #         self.config['private_subnet_id'] = self.ec2_data['private_subnet_id']
-
         if 'public_subnet_id' not in self.config:
             logger.debug(f'Creating new public subnet in VPC {self.vpc_name}')
             response = self.ec2_client.create_subnet(
@@ -188,6 +187,13 @@ class AWSEC2Backend:
             public_subnet_id = response['Subnet']['SubnetId']
             self.config['public_subnet_id'] = public_subnet_id
 
+        # if 'private_subnet_id' in self.ec2_data:
+        #     sg_info = self.ec2_client.describe_subnets(
+        #         SubnetIds=[self.ec2_data['private_subnet_id']]
+        #     )
+        #     if len(sg_info) > 0:
+        #         self.config['private_subnet_id'] = self.ec2_data['private_subnet_id']
+        #
         # if 'private_subnet_id' not in self.config:
         #     logger.debug(f'Creating new private subnet in VPC {self.vpc_name}')
         #     response = self.ec2_client.create_subnet(
@@ -281,13 +287,6 @@ class AWSEC2Backend:
             if len(sg_info) > 0:
                 self.config['public_rtb_id'] = self.ec2_data['public_rtb_id']
 
-        # if 'private_rtb_id' in self.ec2_data:
-        #     sg_info = self.ec2_client.describe_route_tables(
-        #         RouteTableIds=[self.ec2_data['private_rtb_id']]
-        #     )
-        #     if len(sg_info) > 0:
-        #         self.config['private_rtb_id'] = self.ec2_data['private_rtb_id']
-
         if 'public_rtb_id' not in self.config:
             logger.debug(f'Creating public routing table in VPC {self.vpc_name}')
             # The default RT is the public RT
@@ -310,6 +309,13 @@ class AWSEC2Backend:
             )
             self.config['public_rtb_id'] = publ_route_table_id
 
+        # if 'private_rtb_id' in self.ec2_data:
+        #     sg_info = self.ec2_client.describe_route_tables(
+        #         RouteTableIds=[self.ec2_data['private_rtb_id']]
+        #     )
+        #     if len(sg_info) > 0:
+        #         self.config['private_rtb_id'] = self.ec2_data['private_rtb_id']
+        #
         # if 'private_rtb_id' not in self.config:
         #     logger.debug(f'Creating private routing table in VPC {self.vpc_name}')
         #     # Create private RT
@@ -366,6 +372,14 @@ class AWSEC2Backend:
                     {'IpProtocol': 'tcp',
                         'FromPort': 8080,
                         'ToPort': 8080,
+                        'IpRanges': [{'CidrIp': '10.0.0.0/16'}]},
+                    {'IpProtocol': 'tcp',
+                        'FromPort': 8081,
+                        'ToPort': 8081,
+                        'IpRanges': [{'CidrIp': '10.0.0.0/16'}]},
+                    {'IpProtocol': 'tcp',
+                        'FromPort': 6379,
+                        'ToPort': 6379,
                         'IpRanges': [{'CidrIp': '10.0.0.0/16'}]},
                     {'IpProtocol': 'tcp',
                         'FromPort': 22,
@@ -519,21 +533,21 @@ class AWSEC2Backend:
             if not self.ec2_data or ins_id != self.ec2_data.get('instance_id'):
                 instances = self.ec2_client.describe_instances(InstanceIds=[ins_id])
                 instance_data = instances['Reservations'][0]['Instances'][0]
-                self.config['master_name'] = 'lithops-consume'
+                master_name = 'lithops-consume'
                 for tag in instance_data['Tags']:
                     if tag['Key'] == 'Name':
-                        self.config['master_name'] = tag['Value']
+                        master_name = tag['Value']
+                self.ec2_data = {
+                    'mode': self.mode,
+                    'vpc_data_type': 'provided',
+                    'ssh_data_type': 'provided',
+                    'master_name': master_name,
+                    'master_id': self.config['instance_id']
+                }
 
             # Create the master VM instance
+            self.config['master_name'] = self.ec2_data['master_name']
             self._create_master_instance()
-
-            self.ec2_data = {
-                'mode': self.mode,
-                'vpc_data_type': 'provided',
-                'ssh_data_type': 'provided',
-                'master_name': self.master.name,
-                'master_id': self.master.instance_id
-            }
 
         elif self.mode in [StandaloneMode.CREATE.value, StandaloneMode.REUSE.value]:
 
@@ -573,7 +587,7 @@ class AWSEC2Backend:
                 'master_id': self.vpc_key,
                 'vpc_name': self.vpc_name,
                 'vpc_id': self.config['vpc_id'],
-                'iam_role': self.config['iam_role'],
+                'instance_role': self.config['instance_role'],
                 'target_ami': self.config['target_ami'],
                 'ssh_key_name': self.config['ssh_key_name'],
                 'ssh_key_filename': self.config['ssh_key_filename'],
@@ -589,7 +603,7 @@ class AWSEC2Backend:
 
         self._dump_ec2_data()
 
-    def build_image(self, image_name, script_file, overwrite, extra_args=[]):
+    def build_image(self, image_name, script_file, overwrite, include, extra_args=[]):
         """
         Builds a new VM Image
         """
@@ -609,8 +623,19 @@ class AWSEC2Backend:
                 raise Exception(f"The image with name '{image_name}' already exists with ID: '{image_id}'."
                                 " Use '--overwrite' or '-o' if you want ot overwrite it")
 
-        initial_vpc_data = self._load_ec2_data()
+        is_initialized = self.is_initialized()
         self.init()
+
+        try:
+            del self.config['target_ami']
+        except Exception:
+            pass
+        try:
+            del self.ec2_data['target_ami']
+        except Exception:
+            pass
+
+        self._request_image_id()
 
         build_vm = EC2Instance('building-image-' + image_name, self.config, self.ec2_client, public=True)
         build_vm.delete_on_dismantle = False
@@ -621,18 +646,24 @@ class AWSEC2Backend:
         remote_script = "/tmp/install_lithops.sh"
         script = get_host_setup_script()
         build_vm.get_ssh_client().upload_data_to_file(script, remote_script)
-        logger.debug("Executing installation script. Be patient, this process can take up to 3 minutes")
+        logger.debug("Executing Lithops installation script. Be patient, this process can take up to 3 minutes")
         build_vm.get_ssh_client().run_remote_command(f"chmod 777 {remote_script}; sudo {remote_script}; rm {remote_script};")
-        logger.debug("Installation script finsihed")
+        logger.debug("Lithops installation script finsihed")
+
+        for src_dst_file in include:
+            src_file, dst_file = src_dst_file.split(':')
+            if os.path.isfile(src_file):
+                logger.debug(f"Uploading local file '{src_file}' to VM image in '{dst_file}'")
+                build_vm.get_ssh_client().upload_local_file(src_file, dst_file)
 
         if script_file:
             script = os.path.expanduser(script_file)
-            logger.debug(f"Uploading user script {script_file} to {build_vm}")
+            logger.debug(f"Uploading user script '{script_file}' to {build_vm}")
             remote_script = "/tmp/install_user_lithops.sh"
             build_vm.get_ssh_client().upload_local_file(script, remote_script)
-            logger.debug("Executing user script. Be patient, this process can take long")
+            logger.debug(f"Executing user script '{script_file}'")
             build_vm.get_ssh_client().run_remote_command(f"chmod 777 {remote_script}; sudo {remote_script}; rm {remote_script};")
-            logger.debug("User script finsihed")
+            logger.debug(f"User script '{script_file}' finsihed")
 
         build_vm_id = build_vm.get_instance_id()
 
@@ -656,7 +687,7 @@ class AWSEC2Backend:
                     break
             time.sleep(20)
 
-        if not initial_vpc_data:
+        if not is_initialized:
             while not self.clean(all=True):
                 time.sleep(5)
         else:
@@ -884,8 +915,6 @@ class AWSEC2Backend:
         """
         logger.info('Cleaning AWS EC2 resources')
 
-        self._load_ec2_data()
-
         if not self.ec2_data:
             return True
 
@@ -918,8 +947,7 @@ class AWSEC2Backend:
                 ex.map(lambda worker: worker.stop(), self.workers)
             self.workers = []
 
-        if include_master or self.mode == StandaloneMode.CONSUME.value:
-            # in consume mode master VM is a worker
+        if include_master:
             self.master.stop()
 
     def get_instance(self, name, **kwargs):
@@ -989,10 +1017,6 @@ class EC2Instance:
         """
         self.name = name.lower()
         self.config = ec2_config
-        self.metadata = {}
-
-        self.status = None
-        self.err = None
 
         self.delete_on_dismantle = self.config['delete_on_dismantle']
         self.instance_type = self.config['worker_instance_type']
@@ -1150,7 +1174,7 @@ class EC2Instance:
             "ImageId": self.config['target_ami'],
             "InstanceType": self.instance_type,
             "EbsOptimized": False,
-            "IamInstanceProfile": {'Name': self.config['iam_role']},
+            "IamInstanceProfile": {'Name': self.config['instance_role']},
             "Monitoring": {'Enabled': False},
             'KeyName': self.config['ssh_key_name']
         }
@@ -1215,10 +1239,10 @@ class EC2Instance:
 
             resp = self.ec2_client.run_instances(**LaunchSpecification)
 
-            self.instance_data = resp['Instances'][0]
-            self.instance_id = self.instance_data['InstanceId']
-
         logger.debug(f"VM instance {self.name} created successfully ")
+
+        self.instance_data = resp['Instances'][0]
+        self.instance_id = self.instance_data['InstanceId']
 
         return self.instance_data
 
@@ -1340,7 +1364,7 @@ class EC2Instance:
         self.instance_data = None
         self.instance_id = None
         self.private_ip = None
-        self.public_ip = None
+        self.public_ip = '0.0.0.0'
         self.del_ssh_client()
 
     def _stop_instance(self):
@@ -1349,6 +1373,11 @@ class EC2Instance:
         """
         logger.debug(f"Stopping VM instance {self.name} ({self.instance_id})")
         self.ec2_client.stop_instances(InstanceIds=[self.instance_id])
+
+        self.instance_data = None
+        self.private_ip = None
+        self.public_ip = '0.0.0.0'
+        self.del_ssh_client()
 
     def stop(self):
         """

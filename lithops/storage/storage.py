@@ -37,7 +37,7 @@ COBJECTS_INDEX = itertools.count()
 class Storage:
     """
     An Storage object is used by partitioner and other components to access
-    underlying storage backend without exposing the the implementation details.
+    underlying storage backend without exposing the implementation details.
     """
 
     def __init__(self, config=None, backend=None, storage_config=None):
@@ -58,7 +58,6 @@ class Storage:
             self.config = extract_storage_config(storage_config)
 
         self.backend = self.config['backend']
-        self.bucket = self.config['bucket']
 
         try:
             module_location = f'lithops.storage.backends.{self.backend}'
@@ -69,6 +68,9 @@ class Storage:
             logger.error("An exception was produced trying to create the "
                          f"'{self.backend}' storage backend")
             raise e
+
+        bucket = self.config[self.backend].get('storage_bucket')
+        self.bucket = bucket or self.storage_handler.generate_bucket_name()
 
     def get_client(self) -> object:
         """

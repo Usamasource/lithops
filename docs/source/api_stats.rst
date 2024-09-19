@@ -10,6 +10,12 @@ Execution summary plots
 
 The :code:`plot()` method from :code:`FunctionExecutor` creates a scatter plot and a histogram plot showing a summary of the tasks executed by a :code:`FunctionExecutor`. By default, lithops creates a :code:`plots/` directory in the working directory path containing both plots in PNG format. For more details refer to the `FunctionExecutor API reference <https://lithops-cloud.github.io/docs/source/api_futures.html>`_.
 
+To get started, first install Lithops and the plotting dependencies with:
+
+.. code-block:: bash
+
+   python3 -m pip install lithops[plotting]
+
 * **Scatter Plot**: the scatter plot shows a timeline on the horizontal axis where the stages of all invocations are arranged on the vertical axis.
     - :code:`host submit` indicates the time that the orchestrator process has invoked the function.
     - :code:`call start` indicates the timestamp at which the function starts its execution.
@@ -85,13 +91,21 @@ The user can obtain these statistics through the future object:
      'worker_cold_start': True,
      'worker_end_tstamp': 1647526902.397567,
      'worker_exec_time': 0.23604679,
+     'worker_func_cpu_usage': [0.0, 25.0],
+     'worker_func_cpu_user_time': 70566.78125,
+     'worker_func_cpu_system_time': 16418.34375,
      'worker_func_end_tstamp': 1647526902.2985177,
      'worker_func_exec_time': 1.91e-06,
+     'worker_func_recv_net_io': 5968,
+     'worker_func_sent_net_io': 1223,
      'worker_func_start_tstamp': 1647526902.2985158,
-     'worker_result_upload_time': 0.07001352,
-     'worker_start_tstamp': 1647526902.1615202,
+     'worker_func_rss': 60678144,
+     'worker_func_uss': 44838912,
+     'worker_func_vms': 552267776,
      'worker_peak_memory_start': 88469504,
-     'worker_peak_memory_end': 126469504}
+     'worker_peak_memory_end': 126469504,
+     'worker_result_upload_time': 0.07001352,
+     'worker_start_tstamp': 1647526902.1615202}
 
 
 .. list-table::
@@ -132,12 +146,28 @@ The user can obtain these statistics through the future object:
      - Timestamp in which the worker function had finished its execution.
    * - :code:`worker_exec_time`
      - Total execution time of the worker function (lithops wrapper + user defined funtion execution time).
+   * - :code:`worker_func_cpu_usage`
+     - Array of CPU usage percentages, with each element representing the average usage of each CPU core during user-defined function execution.
+   * - :code:`worker_func_cpu_user_time`
+     - CPU user time during the execution of the user-defined function.
+   * - :code:`worker_func_cpu_system_time`
+     - CPU system time during the execution of the user-defined function.
    * - :code:`worker_func_end_tstamp`
      - Timestamp of the end of execution of the user-defined function.
    * - :code:`worker_func_exec_time`
      - Total execution time of the user-defined function.
+   * - :code:`worker_func_recv_net_io`
+     - Network I/O bytes received during the execution of the user-defined function.
+   * - :code:`worker_func_sent_net_io`
+     - Network I/O bytes sent during the execution of the user-defined function.
    * - :code:`worker_func_start_tstamp`
      - Timestamp of the start of execution of the user-defined function.
+   * - :code:`worker_func_rss`
+     - Resident Set Size (RSS) in bytes, indicating the amount of physical memory occupied by the user-defined function during its execution.
+   * - :code:`worker_func_uss`
+     - Unique Set Size (USS) in bytes, representing the memory exclusively used by the function that is not shared with other processes.
+   * - :code:`worker_func_vms`
+     - Virtual Memory Size (VMS) in bytes used by the user-defined function. This metric quantifies the total virtual memory allocated.
    * - :code:`worker_result_upload_time`
      - Total time taken for the function to upload the result to cloud object storage.
    * - :code:`worker_start_tstamp`

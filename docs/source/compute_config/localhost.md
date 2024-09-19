@@ -14,7 +14,7 @@ lithops:
 
 ## Execution Environments
 
-The localhost backend can run functions both using the local ``python3`` interpreter, or using a ``docker container`` image. The environment is automatically chosen depending on whether or not you provided a Docker image as a runtime.
+The localhost backend can run functions both using the local ``python3`` interpreter, or using a ``container`` image. The environment is automatically chosen depending on whether or not you provided a Docker image as a runtime.
 
 In both cases, you can view the executions logs in your local machine using the *lithops client*:
 
@@ -24,7 +24,7 @@ lithops logs poll
 
 ### Default Environment
 
-By default Lithops uses the local python interpreter to run the functions. That is, if for example you executed the main script with ``python3.8``, your functions will run with ``python3.8``. in this case, you must ensure that all the dependencies of your script are installed in your machine.
+By default Lithops uses the local python interpreter to run the functions. That is, if for example you executed the main script with ``python3.12``, your functions will run with ``python3.12``. in this case, you must ensure that all the dependencies of your script are installed in your machine.
 
 ```python
 # As we use the default FunctionExecutor(), backend must be set to localhost in config
@@ -38,25 +38,25 @@ or alternatively, you can force the Localhost executor with:
 fexec = lithops.LocalhostExecutor()
 ```
 
-### Docker Environment
+### Container Environment
 
-The Docker environment runs the functions within a ``docker container``. In this case you must [install the Docker CE version](https://docs.docker.com/get-docker/) in your machine. This environment is automatically activated when you provide a docker image as a runtime. For example, by adding the following keys in the config:
+The Container environment runs the functions within a ``docker container``. In this case you must [install the Docker CE version](https://docs.docker.com/get-docker/) in your machine. This environment is automatically activated when you provide a docker image as a runtime. For example, by adding the following keys in the config:
 
 ```yaml
 localhost:
-    runtime: lithopscloud/ibmcf-python-v310
+    runtime: docker.io/lithopscloud/ibmcf-python-v312
 ```
 
 or by using the ``runtime`` param in a function executor:
 
 ```python
 # As we use the default FunctionExecutor(), the "backend" config parameter must be set to localhost in config
-fexec = lithops.FunctionExecutor(runtime='lithopscloud/ibmcf-python-v310')
+fexec = lithops.FunctionExecutor(runtime='docker.io/lithopscloud/ibmcf-python-v312')
 ```
 
 ```python
 # As we use/force the LocalhostExecutor(), the "backend" config parameter does not need to be set to localhost in config
-fexec = lithops.LocalhostExecutor(runtime='lithopscloud/ibmcf-python-v310')
+fexec = lithops.LocalhostExecutor(runtime='docker.io/lithopscloud/ibmcf-python-v312')
 ```
 
 In this mode of execution, you can use any docker image that contains all the required dependencies. For example, the IBM Cloud Functions and Knative runtimes are compatible with it.
@@ -66,7 +66,7 @@ In this mode of execution, you can use any docker image that contains all the re
 |Group|Key|Default|Mandatory|Additional info|
 |---|---|---|---|---|
 |localhost | runtime | python3 | no | By default it uses the `python3` interpreter. It can be a container image name |
-|localhost | version | 1 | no | There are 2 diferent localhost implementations. Use '2' for using the alterantive version (beta) |
+|localhost | version | 2 | no | There are 2 different localhost implementations. Use '1' for using the alternative version |
 |localhost | worker_processes | CPU_COUNT | no | Number of Lithops processes. This is used to parallelize function activations. By default it is set to the number of CPUs of your machine |
 
 ## Test Lithops
@@ -84,3 +84,5 @@ You can view the function executions logs in your local machine using the *litho
 ```bash
 lithops logs poll
 ```
+
+You can view the localhost runner logs in `/tmp/lithops-*/localhost-runner.log`

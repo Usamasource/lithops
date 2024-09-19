@@ -25,7 +25,14 @@ from contextlib import contextmanager
 
 from lithops.version import __version__ as lithops_ver
 from lithops.utils import sizeof_fmt, is_unix_system, b64str_to_bytes
-from lithops.constants import LITHOPS_TEMP_DIR, MODULES_DIR
+from lithops.constants import MODULES_DIR, SA_INSTALL_DIR, LITHOPS_TEMP_DIR
+
+try:
+    import psutil
+    psutil_found = True
+except ModuleNotFoundError:
+    psutil_found = False
+
 
 logger = logging.getLogger(__name__)
 
@@ -40,22 +47,26 @@ def get_function_and_modules(job, internal_storage):
     """
     Gets the function and modules from storage
     """
-    logger.debug("Getting function and modules")
+    logger.info("Getting function and modules")
+    backend = job.config['lithops']['backend']
+    func_path = '/'.join([LITHOPS_TEMP_DIR, job.func_key])
+    func_obj = None
 
-    if job.config['lithops'].get('customized_runtime'):
-        logger.debug("Customized runtime feature activated. Loading "
-                     "function and modules from local runtime")
-        func_path = '/'.join([LITHOPS_TEMP_DIR, job.func_key])
+    if job.config[backend].get('runtime_include_function'):
+        logger.info("Runtime include function feature activated. Loading "
+                    "function/mods from local runtime")
+        func_path = '/'.join([SA_INSTALL_DIR, job.func_key])
         with open(func_path, "rb") as f:
             func_obj = f.read()
     else:
+        logger.info(f"Loading {job.func_key} from storage")
         func_obj = internal_storage.get_func(job.func_key)
 
     loaded_func_all = pickle.loads(func_obj)
 
     if loaded_func_all.get('module_data'):
         module_path = os.path.join(MODULES_DIR, job.job_key)
-        logger.debug("Writing function dependencies to {}".format(module_path))
+        logger.info(f"Writing function dependencies to {module_path}")
         os.makedirs(module_path, exist_ok=True)
         sys.path.append(module_path)
 
@@ -85,16 +96,15 @@ def get_function_data(job, internal_storage):
     """
     Get function data (iteradata) from storage
     """
-    logger.debug("Getting function data")
-
     if job.data_key:
         extra_get_args = {}
         if job.data_byte_ranges is not None:
             init_byte = job.data_byte_ranges[0][0]
             last_byte = job.data_byte_ranges[-1][1]
-            range_str = 'bytes={}-{}'.format(init_byte, last_byte)
+            range_str = f'bytes={init_byte}-{last_byte}'
             extra_get_args['Range'] = range_str
 
+        logger.info("Loading function data parameters from storage")
         data_obj = internal_storage.get_data(job.data_key, extra_get_args=extra_get_args)
 
         loaded_data = []
@@ -263,3 +273,76 @@ class LogStream:
 
     def fileno(self):
         return self._stdout.fileno()
+
+
+class SystemMonitor:
+
+    def __init__(self, process_id=None):
+        """
+        Initialize the SystemMonitor.
+        If process_id is None, monitor the current process.
+        """
+        self.process_id = process_id
+        self.cpu_usage = []
+        self.process = None
+        self.cpu_times = None
+        self.current_net_io = None
+        self.mem_info = None
+
+    def start(self):
+        """
+        Start monitoring.
+        """
+        if not psutil_found:
+            return
+
+        self.process = psutil.Process(self.process_id)
+
+        # record the initial CPU usage (to be ignored).
+        psutil.cpu_percent(interval=None, percpu=True)
+
+        # Reset the network IO counters cache and baseline.
+        psutil.net_io_counters.cache_clear()
+        self.start_net_io = psutil.net_io_counters()
+
+    def stop(self):
+        """
+        Stop monitoring.
+        """
+        if not psutil_found:
+            return
+
+        # Record the CPU usage since the last call (start).
+        self.cpu_usage = psutil.cpu_percent(interval=None, percpu=True)
+        self.cpu_times = psutil.cpu_times()
+        self.current_net_io = psutil.net_io_counters()
+        self.mem_info = self.process.memory_full_info()
+
+    def get_cpu_info(self):
+        """
+        Return CPU usage, system time, and user time for each CPU core.
+        """
+        if not psutil_found:
+            return {"usage": [], "system": 0, "user": 0}
+
+        return {"usage": self.cpu_usage, "system": self.cpu_times.system, "user": self.cpu_times.user}
+
+    def get_network_io(self):
+        """
+        Calculate network IO (bytes sent and received) since the last reset.
+        """
+        if not psutil_found:
+            return {"sent": 0, "recv": 0}
+
+        bytes_sent = self.current_net_io.bytes_sent - self.start_net_io.bytes_sent
+        bytes_recv = self.current_net_io.bytes_recv - self.start_net_io.bytes_recv
+        return {"sent": bytes_sent, "recv": bytes_recv}
+
+    def get_memory_info(self):
+        """
+        Get memory usage information of the monitored process.
+        """
+        if not psutil_found:
+            return {"rss": 0, "vms": 0, "uss": 0}
+
+        return {"rss": self.mem_info.rss, "vms": self.mem_info.vms, "uss": self.mem_info.uss}

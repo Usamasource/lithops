@@ -7,7 +7,7 @@ Lithops with *GCP Cloud Run* as serverless compute backend.
 1. Install Google Cloud Platform backend dependencies:
 
 ```bash
-python3 -m install lithops[gcp]
+python3 -m pip install lithops[gcp]
 ```
 
 2. [Login](https://console.cloud.google.com) to Google Cloud Console (or sign up if you don't have an account).
@@ -28,6 +28,8 @@ python3 -m install lithops[gcp]
 8. Enable the **Cloud Build API** : Navigate to *APIs & services* tab on the menu. Click *ENABLE APIS AND SERVICES*. Look for "Cloud Build API" at the search bar. Click *Enable*.
 
 9. Enable the **Cloud Run API** : Navigate to *APIs & services* tab on the menu. Click *ENABLE APIS AND SERVICES*. Look for "Cloud Run API" at the search bar. Click *Enable*.
+
+10. Enable the **Artifact Registry API**: Navigate to *APIs & services* tab on the menu. Click *ENABLE APIS AND SERVICES*. Look for "Artifact Registry API" at the search bar. Click *Enable*.
 
 ## Configuration
 
@@ -64,7 +66,7 @@ python3 -m install lithops[gcp]
 |gcp_cloudrun | runtime_timeout | 300 |no | Runtime timeout in seconds. Default 5 minutes |
 |gcp_cloudrun | trigger | https  | no | Currently it supports 'https' trigger|
 |gcp_cloudrun | invoke_pool_threads | 100 |no | Number of concurrent threads used for invocation |
-
+|gcp_cloudrun | runtime_include_function | False | no | If set to true, Lithops will automatically build a new runtime, including the function's code, instead of transferring it through the storage backend at invocation time. This is useful when the function's code size is large (in the order of 10s of MB) and the code does not change frequently |
 
 ## Test Lithops
 Once you have your compute and storage backends configured, you can run a hello world function with:

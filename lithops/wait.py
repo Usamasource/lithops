@@ -49,8 +49,9 @@ def wait(fs: Union[ResponseFuture, FuturesList, List[ResponseFuture]],
          download_results: Optional[bool] = False,
          timeout: Optional[int] = None,
          threadpool_size: Optional[int] = THREADPOOL_SIZE,
-         wait_dur_sec: Optional[int] = WAIT_DUR_SEC,
-         show_progressbar: Optional[bool] = True) -> Tuple[FuturesList, FuturesList]:
+         wait_dur_sec: Optional[int] = None,
+         show_progressbar: Optional[bool] = True,
+         futures_from_executor_wait: Optional[bool] = False) -> Tuple[FuturesList, FuturesList]:
     """
     Wait for the Future instances (possibly created by different Executor instances)
     given by fs to complete. Returns a named 2-tuple of sets. The first set, named done,
@@ -67,7 +68,7 @@ def wait(fs: Union[ResponseFuture, FuturesList, List[ResponseFuture]],
     :param download_results: Download results. Default false (Only get statuses)
     :param timeout: Timeout of waiting for results.
     :param threadpool_size: Number of threads to use. Default 64
-    :param wait_dur_sec: Time interval between each check.
+    :param wait_dur_sec: Time interval between each check. Default 1 second
     :param show_progressbar: whether or not to show the progress bar.
 
     :return: `(fs_done, fs_notdone)`
@@ -82,23 +83,27 @@ def wait(fs: Union[ResponseFuture, FuturesList, List[ResponseFuture]],
         fs = [fs]
 
     if download_results:
-        fs_to_wait = len(fs)
-        msg = (f'ExecutorID {fs[0].executor_id} - Getting results from {len(fs)} function activations')
         fs_done = [f for f in fs if f.done]
         fs_not_done = [f for f in fs if not f.done]
-
     else:
-        fs_to_wait = math.ceil(return_when * len(fs) / 100)
-        msg_text = 'any' if return_when == ANY_COMPLETED else f'{return_when}%'
-        msg = (f'ExecutorID {fs[0].executor_id} - Waiting for {msg_text} of '
-               f'{len(fs)} function activations to complete')
         fs_done = [f for f in fs if f.success or f.done]
         fs_not_done = [f for f in fs if not (f.success or f.done)]
 
-    logger.info(msg)
-
     if not fs_not_done:
+        logger.debug(f'ExecutorID {fs[0].executor_id} - All function activations are done')
         return fs_done, fs_not_done
+
+    not_done_futures = fs_not_done if futures_from_executor_wait else fs
+
+    fs_to_wait = math.ceil(return_when * len(not_done_futures) / 100)
+
+    if return_when == ALL_COMPLETED:
+        logger.info(f'ExecutorID {fs[0].executor_id} - Waiting for '
+                    f'{len(not_done_futures)} function activations to complete')
+    else:
+        txt = 'any' if return_when == ANY_COMPLETED else f'{return_when}%'
+        logger.info(f'ExecutorID {fs[0].executor_id} - Waiting for {txt} of '
+                    f'{len(not_done_futures)} function activations to complete')
 
     if is_unix_system() and timeout is not None:
         logger.debug(f'Setting waiting timeout to {timeout} seconds')
@@ -108,8 +113,7 @@ def wait(fs: Union[ResponseFuture, FuturesList, List[ResponseFuture]],
 
     # Setup progress bar
     pbar = None
-    if not is_lithops_worker() and logger.getEffectiveLevel() == logging.INFO \
-       and show_progressbar:
+    if not is_lithops_worker() and show_progressbar and logger.getEffectiveLevel() != logging.DEBUG:
         from tqdm.auto import tqdm
         if not is_notebook():
             print()
@@ -127,7 +131,8 @@ def wait(fs: Union[ResponseFuture, FuturesList, List[ResponseFuture]],
                     internal_storage=executor_data.internal_storage)
                 job_monitor.start(fs=executor_data.futures)
 
-        sleep_sec = wait_dur_sec if job_monitor.backend == 'storage' else 0.3
+        sleep_sec = wait_dur_sec or WAIT_DUR_SEC if job_monitor.type == 'storage' \
+            and job_monitor.storage_backend != 'localhost' else 0.1
 
         if return_when == ALWAYS:
             for executor_data in executors_data:
@@ -149,7 +154,7 @@ def wait(fs: Union[ResponseFuture, FuturesList, List[ResponseFuture]],
             not_dones_call_ids = [(f.job_id, f.call_id) for f in fs if not f.done]
         else:
             not_dones_call_ids = [(f.job_id, f.call_id) for f in fs if not f.success and not f.done]
-        msg = ('Cancelled - Total Activations not done: {}'.format(len(not_dones_call_ids)))
+        msg = (f'Cancelled - Total Activations not done: {len(not_dones_call_ids)}')
         if pbar:
             pbar.close()
             print()
@@ -182,7 +187,7 @@ def get_result(fs: Optional[Union[ResponseFuture, FuturesList, List[ResponseFutu
                throw_except: Optional[bool] = True,
                timeout: Optional[int] = None,
                threadpool_size: Optional[int] = THREADPOOL_SIZE,
-               wait_dur_sec: Optional[int] = WAIT_DUR_SEC,
+               wait_dur_sec: Optional[int] = None,
                show_progressbar: Optional[bool] = True):
     """
     For getting the results from all function activations
@@ -192,13 +197,18 @@ def get_result(fs: Optional[Union[ResponseFuture, FuturesList, List[ResponseFutu
     :param throw_except: Reraise exception if call raised. Default True.
     :param timeout: Timeout for waiting for results.
     :param threadpool_size: Number of threads to use. Default 128
-    :param wait_dur_sec: Time interval between each check.
+    :param wait_dur_sec: Time interval between each check. Default 1 second
     :param show_progressbar: whether or not to show the progress bar.
 
     :return: The result of the future/s
     """
     if type(fs) is not list and type(fs) is not FuturesList:
         fs = [fs]
+
+    logger.info(
+        (f'ExecutorID {fs[0].executor_id} - Getting results from '
+         f'{len(fs)} function activations')
+    )
 
     fs_done, _ = wait(fs=fs, throw_except=throw_except,
                       timeout=timeout, download_results=True,
@@ -207,11 +217,10 @@ def get_result(fs: Optional[Union[ResponseFuture, FuturesList, List[ResponseFutu
                       wait_dur_sec=wait_dur_sec,
                       show_progressbar=show_progressbar)
     result = []
-    fs_done = [f for f in fs_done if not f.futures and f._produce_output]
-    for f in fs_done:
+    for f in [f for f in fs_done if not f.futures and f._produce_output]:
         result.append(f.result(throw_except=throw_except))
 
-    logger.debug("ExecutorID {} - Finished getting results".format(fs[0].executor_id))
+    logger.debug(f"ExecutorID {fs[0].executor_id} - Finished getting results")
 
     return result
 

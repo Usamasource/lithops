@@ -54,7 +54,6 @@ Storage Backends
 - [Aliyun Functions](../docs/source/compute_config/aliyun_functions.md)
 - [Oracle Cloud Functions](../docs/source/compute_config/oracle_functions.md)
 - [OpenWhisk](../docs/source/compute_config/openwhisk.md)
-- [IBM Cloud Functions](../docs/source/compute_config/ibm_cf.md)
 
 <b>Serverless (CaaS) Backends:</b>
 - [IBM Code Engine](../docs/source/compute_config/code_engine.md)
@@ -63,6 +62,7 @@ Storage Backends
 - [Azure Container APPs](../docs/source/compute_config/azure_containers.md)
 - [Kubernetes](../docs/source/compute_config/kubernetes.md)
 - [Knative](../docs/source/compute_config/knative.md)
+- [Singularity](../docs/source/compute_config/singularity.md)
 
 <b>Standalone Backends:</b>
 - [Virtual Machine](../docs/source/compute_config/vm.md)
@@ -113,16 +113,25 @@ if __name__ == '__main__':
 ```
 
 ### Providing configuration in runtime
-Example of providing configuration keys for IBM Cloud Functions and IBM Cloud Object Storage
+Example of providing configuration keys for IBM Code Engine and IBM Cloud Object Storage
 
 ```python
 import lithops
 
-config = {'lithops': {'backend': 'code_engine', 'storage': 'ibm_cos'},
-          'ibm': {'region': 'REGION',
-                  'iam_api_key': 'IAM_API_KEY',
-                  'resource_group_id': 'RESOURCE_GROUP_ID'},
-          'ibm_cos': {'storage_bucket': 'STORAGE_BUCKET'}}
+config = {
+    'lithops': {
+        'backend': 'code_engine',
+        'storage': 'ibm_cos'
+    },
+    'ibm': {
+        'region': 'REGION',
+        'iam_api_key': 'IAM_API_KEY',
+        'resource_group_id': 'RESOURCE_GROUP_ID'
+    },
+    'ibm_cos': {
+        'storage_bucket': 'STORAGE_BUCKET'
+    }
+}
 
 def hello_world(name):
     return f'Hello {name}!'
@@ -137,8 +146,8 @@ if __name__ == '__main__':
 
 |Group|Key|Default|Mandatory|Additional info|
 |---|---|---|---|---|
-|lithops | backend | aws_lambda | no | Compute backend implementation. IBM Cloud Functions is the default |
-|lithops | storage | aws_s3 | no | Storage backend implementation. IBM Cloud Object Storage is the default |
+|lithops | backend | aws_lambda | no | Compute backend implementation. `localhost` is the default if no config or config file is provided|
+|lithops | storage | aws_s3 | no | Storage backend implementation. `localhost` is the default if no config or config file is provided|
 |lithops | data_cleaner | True | no |If set to True, then the cleaner will automatically delete all the temporary data that was written into `storage_bucket/lithops.jobs`|
 |lithops | monitoring | storage | no | Monitoring system implementation. One of: **storage** or **rabbitmq** |
 |lithops | monitoring_interval | 2 | no | Monitoring check interval in seconds in case of **storage** monitoring |
@@ -150,4 +159,3 @@ if __name__ == '__main__':
 |lithops | log_format | "%(asctime)s [%(levelname)s] %(name)s -- %(message)s" |no | Logging format string |
 |lithops | log_stream | ext://sys.stderr |no | Logging stream. eg.: ext://sys.stderr,  ext://sys.stdout|
 |lithops | log_filename |  |no | Path to a file. log_filename has preference over log_stream. |
-|lithops | customized_runtime | False | no | Enables to build a new runtime with the map() function and its dependencies integrated. Only docker-based backends support this feature. |

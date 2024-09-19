@@ -172,20 +172,8 @@ def default_config(config_file=None, config_data=None, config_overwrite={}, load
 
     if mode == c.LOCALHOST:
         logger.debug("Loading compute backend module: localhost")
-
-        config_data[backend]['max_workers'] = 1
-
-        if 'execution_timeout' not in config_data['lithops']:
-            config_data['lithops']['execution_timeout'] = c.EXECUTION_TIMEOUT_LOCALHOST_DEFAULT
-
-        if 'storage' not in config_data['lithops']:
-            config_data['lithops']['storage'] = c.LOCALHOST
-
-        if 'worker_processes' not in config_data[c.LOCALHOST]:
-            config_data[backend]['worker_processes'] = c.CPU_COUNT
-
-        if 'runtime' not in config_data[c.LOCALHOST]:
-            config_data[backend]['runtime'] = c.LOCALHOST_RUNTIME_DEFAULT
+        cb_config = importlib.import_module('lithops.localhost.config')
+        cb_config.load_config(config_data)
 
     elif mode == c.SERVERLESS:
         logger.debug(f"Loading Serverless backend module: {backend}")
@@ -196,21 +184,19 @@ def default_config(config_file=None, config_data=None, config_overwrite={}, load
         logger.debug(f"Loading Standalone backend module: {backend}")
         sb_config = importlib.import_module(f'lithops.standalone.backends.{backend}.config')
         sb_config.load_config(config_data)
-
-    if 'monitoring' not in config_data['lithops']:
-        config_data['lithops']['monitoring'] = c.MONITORING_DEFAULT
-
-    if 'execution_timeout' not in config_data['lithops']:
-        config_data['lithops']['execution_timeout'] = c.EXECUTION_TIMEOUT_DEFAULT
+        config_data['lithops']['chunksize'] = 0
 
     if 'chunksize' not in config_data['lithops']:
         config_data['lithops']['chunksize'] = config_data[backend]['worker_processes']
 
     if load_storage_config:
         config_data = default_storage_config(config_data=config_data)
-        if config_data['lithops']['storage'] == c.LOCALHOST \
-           and backend != c.LOCALHOST:
+        if config_data['lithops']['storage'] == c.LOCALHOST and backend != c.LOCALHOST:
             raise Exception(f'Localhost storage backend cannot be used with {backend}')
+
+    for key in c.LITHOPS_DEFAULT_CONFIG_KEYS:
+        if key not in config_data['lithops']:
+            config_data['lithops'][key] = c.LITHOPS_DEFAULT_CONFIG_KEYS[key]
 
     return config_data
 
@@ -239,12 +225,13 @@ def default_storage_config(config_file=None, config_data=None, backend=None):
 
 def extract_storage_config(config):
     s_config = {}
+    s_config['monitoring_interval'] = config['lithops'].get(
+        'monitoring_interval', c.LITHOPS_DEFAULT_CONFIG_KEYS['monitoring_interval']
+    )
     backend = config['lithops']['storage']
     s_config['backend'] = backend
     s_config[backend] = config[backend] if backend in config and config[backend] else {}
     s_config[backend]['user_agent'] = f'lithops/{__version__}'
-
-    s_config['bucket'] = s_config[backend].get('storage_bucket')
 
     return s_config
 

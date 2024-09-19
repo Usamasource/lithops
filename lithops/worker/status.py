@@ -1,10 +1,10 @@
 import os
+import ast
 import pika
 import json
 import time
 import logging
 from tblib import pickling_support
-from distutils.util import strtobool
 from contextlib import contextmanager
 
 import lithops.worker
@@ -45,7 +45,7 @@ class CallStatus:
             'chunksize': job.chunksize
         }
 
-        if strtobool(os.environ.get('WARM_CONTAINER', 'False')):
+        if ast.literal_eval(os.environ.get('WARM_CONTAINER', 'False')):
             self.status['worker_cold_start'] = False
         else:
             self.status['worker_cold_start'] = True

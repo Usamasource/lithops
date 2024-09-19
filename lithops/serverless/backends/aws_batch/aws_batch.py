@@ -21,6 +21,7 @@ import re
 import logging
 import subprocess
 import sys
+import botocore
 import time
 import boto3
 
@@ -36,43 +37,56 @@ logger = logging.getLogger(__name__)
 
 class AWSBatchBackend:
 
-    def __init__(self, aws_batch_config, internal_storage):
+    def __init__(self, batch_config, internal_storage):
         """
         Initialize AWS Batch Backend
         """
-        logger.debug('Creating AWS Lambda client')
+        logger.debug('Creating AWS Batch client')
 
         self.name = 'aws_batch'
         self.type = utils.BackendType.BATCH.value
-        self.aws_batch_config = aws_batch_config
+        self.aws_batch_config = batch_config
+        self.user_agent = batch_config['user_agent']
+        self.region = batch_config['region']
+        self.env_type = batch_config['env_type']
+        self.namespace = batch_config.get('namespace')
 
-        self.user_key = aws_batch_config['access_key_id'][-4:]
-        self.package = f'lithops_v{__version__.replace(".", "-")}_{self.user_key}'
-        self.region_name = aws_batch_config['region']
+        self.aws_session = boto3.Session(
+            aws_access_key_id=batch_config.get('access_key_id'),
+            aws_secret_access_key=batch_config.get('secret_access_key'),
+            aws_session_token=batch_config.get('session_token'),
+            region_name=self.region
+        )
+        self.batch_client = self.aws_session.client('batch')
 
-        self._env_type = self.aws_batch_config['env_type']
-        self._queue_name = f'{self.package}_{self._env_type.replace("_", "-")}_queue'
-        self._compute_env_name = f'{self.package}_{self._env_type.replace("_", "-")}_env'
-
-        logger.debug('Creating Boto3 AWS Session and Batch Client')
-        self.aws_session = boto3.Session(aws_access_key_id=aws_batch_config['access_key_id'],
-                                         aws_secret_access_key=aws_batch_config['secret_access_key'],
-                                         aws_session_token=aws_batch_config.get('session_token'),
-                                         region_name=self.region_name)
-        self.batch_client = self.aws_session.client('batch', region_name=self.region_name)
+        self.batch_client = self.aws_session.client(
+            'batch', config=botocore.client.Config(
+                user_agent_extra=self.user_agent
+            )
+        )
 
         self.internal_storage = internal_storage
 
-        if 'account_id' in self.aws_batch_config:
-            self.account_id = self.aws_batch_config['account_id']
-        else:
-            sts_client = self.aws_session.client('sts', region_name=self.region_name)
-            self.account_id = sts_client.get_caller_identity()["Account"]
+        if 'account_id' not in batch_config or 'user_id' not in batch_config:
+            sts_client = self.aws_session.client('sts')
+            identity = sts_client.get_caller_identity()
 
-        self.ecr_client = self.aws_session.client('ecr', region_name=self.region_name)
+        self.account_id = batch_config.get('account_id') or identity["Account"]
+        self.user_id = batch_config.get('user_id') or identity["UserId"]
+        self.user_key = self.user_id.split(":")[0][-4:].lower()
+
+        self.ecr_client = self.aws_session.client('ecr')
+        package = f'lithops_v{__version__.replace(".", "")}_{self.user_key}'
+        self.package = f"{package}_{self.namespace}" if self.namespace else package
+
+        self._queue_name = f'{self.package}_{self.env_type.replace("_", "-")}_queue'
+        self._compute_env_name = f'{self.package}_{self.env_type.replace("_", "-")}_env'
 
         msg = COMPUTE_CLI_MSG.format('AWS Batch')
-        logger.info("{} - Region: {}".format(msg, self.region_name))
+        if self.namespace:
+            logger.info(f"{msg} - Region: {self.region} - Namespace: {self.namespace} - Env: {self.env_type}")
+        else:
+            logger.info(f"{msg} - Region: {self.region} - Env: {self.env_type}")
 
     def _get_default_runtime_image_name(self):
         python_version = utils.CURRENT_PY_VERSION.replace('.', '')
@@ -81,7 +95,7 @@ class AWSBatchBackend:
 
     def _get_full_image_name(self, runtime_name):
         full_image_name = runtime_name if ':' in runtime_name else f'{runtime_name}:latest'
-        registry = f'{self.account_id}.dkr.ecr.{self.region_name}.amazonaws.com'
+        registry = f'{self.account_id}.dkr.ecr.{self.region}.amazonaws.com'
         full_image_name = '/'.join([registry, self.package.replace('-', '.'), full_image_name]).lower()
         repo_name = full_image_name.split('/', 1)[1:].pop().split(':')[0]
         return full_image_name, registry, repo_name
@@ -89,7 +103,7 @@ class AWSBatchBackend:
     def _format_jobdef_name(self, runtime_name, runtime_memory, version=__version__):
         fmt_runtime_name = runtime_name.replace('/', '--').replace(':', '--')
         package = self.package.replace(__version__.replace(".", "-"), version.replace(".", "-"))
-        return f'{package}--{self._env_type}--{fmt_runtime_name}--{runtime_memory}mb'
+        return f'{package}--{self.env_type}--{fmt_runtime_name}--{runtime_memory}mb'
 
     def _unformat_jobdef_name(self, jobdef_name):
         # Default jobdef name is "lithops_v2-7-2_WU5O--FARGATE_SPOT--batch-default-runtime-v39--latest--1024mb"
@@ -122,27 +136,20 @@ class AWSBatchBackend:
                 'securityGroupIds': self.aws_batch_config['security_groups']
             }
 
-            if self._env_type == 'SPOT':
+            if self.env_type == 'SPOT':
                 compute_resources_spec['allocationStrategy'] = 'SPOT_CAPACITY_OPTIMIZED'
 
-            if self._env_type in {'EC2', 'SPOT'}:
+            if self.env_type in {'EC2', 'SPOT'}:
                 compute_resources_spec['instanceRole'] = self.aws_batch_config['instance_role']
                 compute_resources_spec['minvCpus'] = 0
                 compute_resources_spec['instanceTypes'] = ['optimal']
 
-            if 'service_role' in self.aws_batch_config:
-                res = self.batch_client.create_compute_environment(
-                    computeEnvironmentName=self._compute_env_name,
-                    type='MANAGED',
-                    computeResources=compute_resources_spec,
-                    serviceRole=self.aws_batch_config['service_role']
-                )
-            else:
-                res = self.batch_client.create_compute_environment(
-                    computeEnvironmentName=self._compute_env_name,
-                    type='MANAGED',
-                    computeResources=compute_resources_spec,
-                )
+            res = self.batch_client.create_compute_environment(
+                computeEnvironmentName=self._compute_env_name,
+                type='MANAGED',
+                computeResources=compute_resources_spec,
+                serviceRole=self.aws_batch_config.get('service_role', "")
+            )
 
             if res['ResponseMetadata']['HTTPStatusCode'] != 200:
                 raise Exception(res)
@@ -248,12 +255,12 @@ class AWSBatchBackend:
         job_def_name = self._format_jobdef_name(runtime_name, runtime_memory)
         job_def = self._get_job_def(job_def_name)
 
-        if self._env_type in {'EC2', 'SPOT'}:
+        if self.env_type in {'EC2', 'SPOT'}:
             platform_capabilities = ['EC2']
-        elif self._env_type in {'FARGATE', 'FARGATE_SPOT'}:
+        elif self.env_type in {'FARGATE', 'FARGATE_SPOT'}:
             platform_capabilities = ['FARGATE']
         else:
-            raise Exception(f'Unknown env type {self._env_type}')
+            raise Exception(f'Unknown env type {self.env_type}')
 
         if job_def is None:
             logger.debug(f'Creating new Job Definition {job_def_name}')
@@ -262,10 +269,11 @@ class AWSBatchBackend:
             container_properties = {
                 'image': image_name,
                 'executionRoleArn': self.aws_batch_config['execution_role'],
+                'jobRoleArn': self.aws_batch_config['job_role'],
                 'resourceRequirements': [
                     {
                         'type': 'VCPU',
-                        'value': str(self.aws_batch_config['container_vcpus'])
+                        'value': str(self.aws_batch_config['runtime_cpu'])
                     },
                     {
                         'type': 'MEMORY',
@@ -274,7 +282,7 @@ class AWSBatchBackend:
                 ],
             }
 
-            if self._env_type in {'FARGATE', 'FARGATE_SPOT'}:
+            if self.env_type in {'FARGATE', 'FARGATE_SPOT'}:
                 container_properties['networkConfiguration'] = {
                     'assignPublicIp': 'ENABLED' if self.aws_batch_config['assign_public_ip'] else 'DISABLED'
                 }
@@ -380,9 +388,9 @@ class AWSBatchBackend:
 
         if runtime_file:
             assert os.path.isfile(runtime_file), f'Cannot locate "{runtime_file}"'
-            cmd = f'{docker_path} build -t {full_image_name} -f {runtime_file} . '
+            cmd = f'{docker_path} build --platform=linux/amd64 -t {full_image_name} -f {runtime_file} . '
         else:
-            cmd = f'{docker_path} build -t {full_image_name} . '
+            cmd = f'{docker_path} build --platform=linux/amd64 -t {full_image_name} . '
         cmd = cmd + ' '.join(extra_args)
 
         try:
@@ -521,6 +529,11 @@ class AWSBatchBackend:
         return runtimes
 
     def invoke(self, runtime_name, runtime_memory, payload):
+        """
+        Invoke a job -- return information about this invocation
+        """
+        executor_id = payload['executor_id']
+        job_id = payload['job_id']
         total_calls = payload['total_calls']
         max_workers = payload['max_workers']
         chunksize = payload['chunksize']
@@ -531,6 +544,10 @@ class AWSBatchBackend:
             chunksize = total_calls // max_workers + (total_calls % max_workers > 0)
             total_workers = total_calls // chunksize + (total_calls % chunksize > 0)
             payload['chunksize'] = chunksize
+
+        logger.debug(
+            f'ExecutorID {executor_id} | JobID {job_id} - Required Workers: {total_workers}'
+        )
 
         job_name = '{}_{}'.format(self._format_jobdef_name(runtime_name, runtime_memory), payload['job_key'])
 
@@ -576,7 +593,7 @@ class AWSBatchBackend:
 
     def get_runtime_key(self, runtime_name, runtime_memory, version=__version__):
         jobdef_name = self._format_jobdef_name(runtime_name, runtime_memory, version)
-        runtime_key = os.path.join(self.name, version, self.region_name, jobdef_name)
+        runtime_key = os.path.join(self.name, version, self.region, jobdef_name)
         return runtime_key
 
     def get_runtime_info(self):

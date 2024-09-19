@@ -33,11 +33,13 @@ class StorageBackend:
 
     def __init__(self, swift_config):
         logger.debug("Creating OpenStack Swift client")
-        self.auth_url = swift_config['swift_auth_url']
-        self.user_id = swift_config['swift_user_id']
-        self.project_id = swift_config['swift_project_id']
-        self.password = swift_config['swift_password']
-        self.region = swift_config['swift_region']
+        self.auth_url = swift_config['auth_url']
+        self.user_id = swift_config['user_id']
+        self.project_id = swift_config['project_id']
+        self.password = swift_config['password']
+        self.region = swift_config['region']
+        self.user_domain_name = swift_config.get("user_domain_name", "default")
+        self.project_domain_name = swift_config.get("project_domain_name", "default")
         self.endpoint = None
 
         if 'token' in swift_config:
@@ -57,6 +59,14 @@ class StorageBackend:
         msg = STORAGE_CLI_MSG.format('OpenStack Swift')
         logger.info("{} - Region: {}".format(msg, self.region))
 
+    def generate_bucket_name(self):
+        """
+        Generates a unique bucket name
+        """
+        self.config['storage_bucket'] = f'lithops-{self.region}-{self.user_id[:6].lower()}'
+
+        return self.config['storage_bucket']
+
     def generate_swift_token(self):
         """
         Generates new token for accessing to Swift.
@@ -64,9 +74,26 @@ class StorageBackend:
         """
         url = self.auth_url + "/v3/auth/tokens"
         headers = {'Content-Type': 'application/json'}
-        data = {"auth": {"identity": {"methods": ["password"],
-                                      "password": {"user": {"id": self.user_id, "password": self.password}}},
-                         "scope": {"project": {"id": self.project_id}}}}
+        data = {
+            "auth": {
+                "identity": {
+                    "methods": ["password"],
+                    "password": {
+                        "user": {
+                            "name": self.user_id,
+                            "password": self.password,
+                            "domain": {"name": self.user_domain_name}
+                        }
+                    }
+                },
+                "scope": {
+                    "project": {
+                        "id": self.project_id,
+                        "domain": {"name": self.project_domain_name}
+                    }
+                }
+            }
+        }
         json_data = json.dumps(data)
 
         r = requests.post(url, data=json_data, headers=headers)
@@ -89,7 +116,7 @@ class StorageBackend:
             message = json.loads(r.text)['error']['message']
             raise Exception("{} - {} - {}".format(r.status_code, r.reason, message))
 
-    def put_object(self, container_name, key, data):
+    def put_object(self, bucket_name, key, data):
         """
         Put an object in Swift. Override the object if the key already exists.
         :param key: key of the object.
@@ -97,7 +124,7 @@ class StorageBackend:
         :type data: str/bytes
         :return: None
         """
-        url = '/'.join([self.endpoint, container_name, key])
+        url = '/'.join([self.endpoint, bucket_name, key])
         try:
             res = self.session.put(url, data=data)
             status = 'OK' if res.status_code == 201 else 'Error'
@@ -108,16 +135,14 @@ class StorageBackend:
         except Exception as e:
             print(e)
 
-    def get_object(self, container_name, key, stream=False, extra_get_args={}):
+    def get_object(self, bucket_name, key, stream=False, extra_get_args={}):
         """
         Get object from Swift with a key. Throws StorageNoSuchKeyError if the given key does not exist.
         :param key: key of the object
         :return: Data of the object
         :rtype: str/bytes
         """
-        if not container_name:
-            container_name = self.storage_container
-        url = '/'.join([self.endpoint, container_name, key])
+        url = '/'.join([self.endpoint, bucket_name, key])
         headers = {'X-Auth-Token': self.token}
         headers.update(extra_get_args)
         try:
@@ -129,14 +154,14 @@ class StorageBackend:
                     data = res.content
                 return data
             elif res.status_code == 404:
-                raise StorageNoSuchKeyError(container_name, key)
+                raise StorageNoSuchKeyError(bucket_name, key)
             else:
                 raise Exception('{} - {}'.format(res.status_code, key))
         except StorageNoSuchKeyError:
-            raise StorageNoSuchKeyError(container_name, key)
+            raise StorageNoSuchKeyError(bucket_name, key)
         except Exception as e:
             print(e)
-            raise StorageNoSuchKeyError(container_name, key)
+            raise StorageNoSuchKeyError(bucket_name, key)
 
     def upload_file(self, file_name, bucket, key=None, extra_args={}, config=None):
         """Upload a file
@@ -184,35 +209,35 @@ class StorageBackend:
             return False
         return True
 
-    def head_object(self, container_name, key):
+    def head_object(self, bucket_name, key):
         """
         Head object from Swift with a key. Throws StorageNoSuchKeyError if the given key does not exist.
         :param key: key of the object
         :return: Data of the object
         :rtype: str/bytes
         """
-        url = '/'.join([self.endpoint, container_name, key])
+        url = '/'.join([self.endpoint, bucket_name, key])
         try:
             res = self.session.head(url)
             if res.status_code == 200:
                 return res.headers
             elif res.status_code == 404:
-                raise StorageNoSuchKeyError(container_name, key)
+                raise StorageNoSuchKeyError(bucket_name, key)
             else:
                 raise Exception('{} - {}'.format(res.status_code, key))
         except Exception:
-            raise StorageNoSuchKeyError(container_name, key)
+            raise StorageNoSuchKeyError(bucket_name, key)
 
-    def delete_object(self, container_name, key):
+    def delete_object(self, bucket_name, key):
         """
         Delete an object from Swift.
         :param bucket: bucket name
         :param key: data key
         """
-        url = '/'.join([self.endpoint, container_name, key])
+        url = '/'.join([self.endpoint, bucket_name, key])
         return self.session.delete(url)
 
-    def delete_objects(self, container_name, key_list):
+    def delete_objects(self, bucket_name, key_list):
         """
         Delete a list of objects from Swift.
         :param bucket: bucket name
@@ -223,13 +248,13 @@ class StorageBackend:
 
         keys_to_delete = []
         for key in key_list:
-            keys_to_delete.append('/{}/{}'.format(container_name, key))
+            keys_to_delete.append('/{}/{}'.format(bucket_name, key))
 
         keys_to_delete = '\n'.join(keys_to_delete)
         url = '/'.join([self.endpoint, '?bulk-delete'])
         return self.session.delete(url, data=keys_to_delete, headers=headers)
 
-    def list_objects(self, container_name, prefix='', match_pattern=None):
+    def list_objects(self, bucket_name, prefix='', match_pattern=None):
         """
         Lists the objects in a bucket. Throws StorageNoSuchKeyError if the given bucket does not exist.
         :param key: key of the object
@@ -237,9 +262,9 @@ class StorageBackend:
         :rtype: str/bytes
         """
         if prefix:
-            url = '/'.join([self.endpoint, container_name, '?format=json&prefix=' + prefix])
+            url = '/'.join([self.endpoint, bucket_name, '?format=json&prefix=' + prefix])
         else:
-            url = '/'.join([self.endpoint, container_name, '?format=json'])
+            url = '/'.join([self.endpoint, bucket_name, '?format=json'])
         try:
             res = self.session.get(url)
             objects = res.json()
@@ -249,7 +274,7 @@ class StorageBackend:
         except Exception as e:
             raise e
 
-    def list_keys(self, container_name, prefix):
+    def list_keys(self, bucket_name, prefix):
         """
         Return a list of keys for the given prefix.
         :param prefix: Prefix to filter object names.
@@ -257,7 +282,7 @@ class StorageBackend:
         :rtype: list of str
         """
         try:
-            objects = self.list_objects(container_name, prefix)
+            objects = self.list_objects(bucket_name, prefix)
             object_keys = [r['name'] for r in objects]
             return object_keys
         except Exception as e:

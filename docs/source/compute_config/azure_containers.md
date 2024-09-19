@@ -6,7 +6,7 @@ Lithops with Azure Container Apps as serverless compute backend.
 
 1. Install Microsoft Azure backend dependencies:
 
-```
+```bash
 python3 -m pip install lithops[azure]
 ```
 
@@ -95,7 +95,7 @@ az containerapp env create --name lithops --resource-group LithopsResourceGroup 
 |---|---|---|---|---|
 |azure_containers| resource_group | |no | Name of a resource group, for example: `LithopsResourceGroup`. Lithops will use the `resource_group` set under the `azure` section if it is not set here |
 |azure_containers| region |  |no | The location where you created the `lithops` Container APP environment. For example: `westeurope`, `westus2`, etc. Lithops will use the `region` set under the `azure` section if it is not set here|
-|azure_containers| environment | lithops |no | The environemnt name you created in the step 5 of the installation |
+|azure_containers| environment | lithops |no | The environment name you created in the step 5 of the installation |
 |azure_containers | docker_server | index.docker.io |no | Container registry URL |
 |azure_containers | docker_user | |no | Container registry user name |
 |azure_containers | docker_password | |no | Container registry password/token. In case of Docker hub, login to your docker hub account and generate a new access token [here](https://hub.docker.com/settings/security)|
@@ -106,6 +106,8 @@ az containerapp env create --name lithops --resource-group LithopsResourceGroup 
 |azure_containers | runtime_timeout | 600 |no | Runtime timeout in seconds. Default 10 minutes |
 |azure_containers| trigger | pub/sub  | no | Currently it supports pub/sub invocation|
 |azure_containers | invoke_pool_threads | 32 |no | Number of concurrent threads used for invocation |
+|azure_containers | runtime_include_function | False | no | If set to true, Lithops will automatically build a new runtime, including the function's code, instead of transferring it through the storage backend at invocation time. This is useful when the function's code size is large (in the order of 10s of MB) and the code does not change frequently |
+
 
 
 ## Test Lithops

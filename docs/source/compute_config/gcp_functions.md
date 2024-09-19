@@ -7,7 +7,7 @@ Lithops with *GCP Functions* as serverless compute backend.
 1. Install Google Cloud Platform backend dependencies:
 
 ```bash
-python3 -m install lithops[gcp]
+python3 -m pip install lithops[gcp]
 ```
 
 2. [Login](https://console.cloud.google.com) to Google Cloud Console (or sign up if you don't have an account).
@@ -29,6 +29,8 @@ python3 -m install lithops[gcp]
 8. Enable the **Cloud Build API** : Navigate to *APIs & services* tab on the menu. Click *ENABLE APIS AND SERVICES*. Look for "Cloud Build API" at the search bar. Click *Enable*.
 
 9. Enable the **Cloud Functions API** : Navigate to *APIs & services* tab on the menu. Click *ENABLE APIS AND SERVICES*. Look for "Cloud Functions API" at the search bar. Click *Enable*.
+
+10. Enable the **Artifact Registry API**: Navigate to *APIs & services* tab on the menu. Click *ENABLE APIS AND SERVICES*. Look for "Artifact Registry API" at the search bar. Click *Enable*.
 
 ## Configuration
 
