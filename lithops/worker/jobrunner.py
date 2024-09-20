@@ -194,6 +194,13 @@ class JobRunner:
             return value
         return wrapper_decorator
 
+    def _send_metric(self, metric_name, metric_value, job, fn_name):
+        self.prometheus.send_metric(
+            name=metric_name,
+            value=metric_value,
+            type='gauge',
+            labels=(('job_id', job.job_key), ('executor_id', job.executor_id), ('call_id', job.call_id), ('function_name', fn_name or 'undefined')))
+
     @prepost
     def run(self):
         """
@@ -243,6 +250,9 @@ class JobRunner:
             self.stats.write('worker_func_end_tstamp', function_end_tstamp)
             self.stats.write('worker_func_exec_time', round(function_end_tstamp - function_start_tstamp, 8))
             self.stats.write('func_result_size', 0)
+            self._send_metric('worker_func_start_tstamp', function_start_tstamp, self.job, fn_name)
+            self._send_metric('worker_func_end_tstamp', function_end_tstamp, self.job, fn_name)
+            self._send_metric('worker_func_exec_time', round(function_end_tstamp - function_start_tstamp, 8), self.job, fn_name)
 
             if result is not None:
                 # Check for new futures
@@ -258,6 +268,7 @@ class JobRunner:
                     if pickled_output_size < 8 * 1024:  # 8KB
                         self.stats.write('result', pickled_output)
                         self.stats.write("worker_result_upload_time", 0)
+                        self._send_metric('worker_result_upload_time', 0, self.job, fn_name)
                         result = None
 
         except Exception:
@@ -308,5 +319,6 @@ class JobRunner:
                 self.internal_storage.put_data(self.output_key, pickled_output)
                 output_upload_end_tstamp = time.time()
                 self.stats.write("worker_result_upload_time", round(output_upload_end_tstamp - output_upload_start_tstamp, 8))
+                self._send_metric('worker_result_upload_time', round(output_upload_end_tstamp - output_upload_start_tstamp, 8), self.job, fn_name)
             self.jobrunner_conn.send("Finished")
             logger.info("Process finished")
